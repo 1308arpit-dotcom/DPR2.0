@@ -196,9 +196,16 @@ export default function DprPage() {
                 <select
                   value={selectedJobCard}
                   onChange={(e) => setSelectedJobCard(e.target.value)}
+                  disabled={loading}
                   className="w-full rounded-xl border border-slate-200 p-2.5 bg-slate-50 text-slate-900"
                 >
-                  <option value="">-- All Job Cards ({jobCards.length}) --</option>
+                  <option value="">
+                    {loading
+                      ? "Loading job cards from sheet..."
+                      : jobCards.length === 0
+                      ? "-- No Job Cards Found (Check Vercel env vars) --"
+                      : `-- All Job Cards (${jobCards.length}) --`}
+                  </option>
                   {jobCards.map((j) => (
                     <option key={j.jobCardNo} value={j.jobCardNo}>
                       {j.jobCardNo}
@@ -215,9 +222,16 @@ export default function DprPage() {
                   required
                   value={lineCode}
                   onChange={(e) => handleLineCodeSelect(e.target.value)}
+                  disabled={loading}
                   className="w-full rounded-xl border border-slate-200 p-2.5 bg-slate-50 text-slate-900 font-mono text-xs"
                 >
-                  <option value="">-- Select Line Code --</option>
+                  <option value="">
+                    {loading
+                      ? "Loading line codes from sheet..."
+                      : filteredBoq.length === 0
+                      ? "-- No Line Codes Found --"
+                      : "-- Select Line Code --"}
+                  </option>
                   {filteredBoq.map((b) => (
                     <option key={b.lineCode} value={b.lineCode}>
                       {b.lineCode} - {b.itemDescription.substring(0, 35)}
