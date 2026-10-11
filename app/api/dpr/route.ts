@@ -1,20 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-
-import { appendSheetRow, readSheetRows } from "@/lib/google-sheets";
-
-const DPR_HEADERS = [
-  "date",
-  "jobCardNumber",
-  "activityDescription",
-  "quantityExecuted",
-  "laborCount",
-  "remarks",
-  "submittedBy",
-] as const;
+import { fetchDprEntries, recordDpr } from "@/lib/google-sheets";
 
 export async function GET() {
   try {
-    const items = await readSheetRows("DPR", DPR_HEADERS);
+    const items = await fetchDprEntries();
     return NextResponse.json({ success: true, items });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to load DPR data.";
@@ -25,25 +14,37 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const payload = await request.json();
-    const row = {
-      date: String(payload.date ?? ""),
-      jobCardNumber: String(payload.jobCardNumber ?? ""),
-      activityDescription: String(payload.activityDescription ?? ""),
-      quantityExecuted: String(payload.quantityExecuted ?? ""),
-      laborCount: String(payload.laborCount ?? ""),
-      remarks: String(payload.remarks ?? ""),
-      submittedBy: String(payload.submittedBy ?? ""),
-    };
 
-    if (!row.date || !row.jobCardNumber || !row.activityDescription) {
+    const lineCode = String(payload.lineCode ?? "").trim();
+    const itemDescription = String(payload.itemDescription ?? "").trim();
+    const actualQty = String(payload.actualQty ?? "").trim();
+    const manpower = String(payload.manpower ?? "").trim();
+    const dateOfDpr = String(payload.dateOfDpr ?? payload.date ?? "").trim();
+    const remark = String(payload.remark ?? payload.remarks ?? "").trim();
+    const enteredBy = String(payload.enteredBy ?? payload.submittedBy ?? "Site Engineer").trim();
+    const uploadDocument = String(payload.uploadDocument ?? "").trim();
+    const planQty = String(payload.planQty ?? "").trim();
+
+    if (!lineCode || !itemDescription || !dateOfDpr) {
       return NextResponse.json(
-        { success: false, message: "Date, job card, and activity description are required." },
-        { status: 400 },
+        { success: false, message: "Line Code, Item Description, and Date Of DPR are required." },
+        { status: 400 }
       );
     }
 
-    const values = await appendSheetRow("DPR", DPR_HEADERS, row);
-    return NextResponse.json({ success: true, item: Object.fromEntries(DPR_HEADERS.map((header, index) => [header, values[index] ?? ""])), row });
+    const savedRow = await recordDpr({
+      lineCode,
+      itemDescription,
+      actualQty,
+      manpower,
+      dateOfDpr,
+      remark,
+      enteredBy,
+      uploadDocument,
+      planQty,
+    });
+
+    return NextResponse.json({ success: true, item: savedRow });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to save DPR entry.";
     return NextResponse.json({ success: false, message }, { status: 500 });

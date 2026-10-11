@@ -3,46 +3,12 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { getSessionFromCookie } from "@/lib/auth";
-import { readSheetRows } from "@/lib/google-sheets";
-
-const dprHeaders = [
-  "date",
-  "jobCardNumber",
-  "activityDescription",
-  "quantityExecuted",
-  "laborCount",
-  "remarks",
-  "submittedBy",
-] as const;
-
-const hindranceHeaders = [
-  "date",
-  "jobCardNumber",
-  "category",
-  "remarks",
-  "documentName",
-  "submittedBy",
-] as const;
-
-const manpowerHeaders = [
-  "date",
-  "contractorName",
-  "category",
-  "resourceName",
-  "quantity",
-  "shift",
-  "remarks",
-  "submittedBy",
-] as const;
-
-const scheduleHeaders = [
-  "milestone",
-  "startDate",
-  "endDate",
-  "contractor",
-  "status",
-  "notes",
-] as const;
+import {
+  fetchDprEntries,
+  fetchHindranceEntries,
+  fetchMachineryEntries,
+  fetchScheduleEntries,
+} from "@/lib/google-sheets";
 
 function parseNumber(value: string | undefined) {
   if (!value) return 0;
@@ -50,84 +16,51 @@ function parseNumber(value: string | undefined) {
   return Number.isFinite(numeric) ? numeric : 0;
 }
 
-function getBarWidth(value: number, total: number) {
-  if (total === 0) return 0;
-  return Math.max(8, (value / total) * 100);
-}
-
 async function loadAnalytics() {
   try {
-    const [dprRows, hindranceRows, manpowerRows, scheduleRows] = await Promise.all([
-      readSheetRows("DPR", dprHeaders),
-      readSheetRows("Hindrance", hindranceHeaders),
-      readSheetRows("Manpower", manpowerHeaders),
-      readSheetRows("Schedule", scheduleHeaders),
+    const [dprRows, hindranceRows, machineryRows, scheduleRows] = await Promise.all([
+      fetchDprEntries(),
+      fetchHindranceEntries(),
+      fetchMachineryEntries(),
+      fetchScheduleEntries(),
     ]);
 
-    const totalDpr = dprRows.length;
-    const totalHindrance = hindranceRows.length;
-    const manpowerTotal = manpowerRows.reduce((sum, row) => sum + parseNumber(row.quantity), 0);
-
-    const categoryCounts = new Map<string, number>();
-    for (const row of hindranceRows) {
-      const key = row.category || "Uncategorized";
-      categoryCounts.set(key, (categoryCounts.get(key) ?? 0) + 1);
-    }
-
-    const topHindrances = Array.from(categoryCounts.entries())
-      .map(([label, count]) => ({ label, count }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 4);
-
-    const scheduleCounts = { "Not Started": 0, "In Progress": 0, "Completed": 0, "Delayed": 0 };
-    for (const row of scheduleRows) {
-      const status = row.status || "Not Started";
-      if (status in scheduleCounts) {
-        scheduleCounts[status as keyof typeof scheduleCounts] += 1;
-      }
-    }
-
-    const completionRate = scheduleRows.length
-      ? Math.round((scheduleCounts["Completed"] / scheduleRows.length) * 100)
-      : 0;
-
-    const monthlyDpr = new Map<string, number>();
-    for (const row of dprRows) {
-      if (!row.date) continue;
-      const monthKey = new Date(row.date).toLocaleString("en-US", { month: "short" });
-      monthlyDpr.set(monthKey, (monthlyDpr.get(monthKey) ?? 0) + 1);
-    }
+    const totalQuantity = dprRows.reduce((sum, item) => sum + parseNumber(item.actualQty), 0);
+    const totalLabor = dprRows.reduce((sum, item) => sum + parseNumber(item.manpower), 0);
+    const totalHindrances = hindranceRows.length;
+    const openHindrances = hindranceRows.filter((h) => h.status !== "Closed" && h.status !== "Resolved").length;
+    const totalMachinery = machineryRows.length;
+    const totalSchedules = scheduleRows.length;
 
     return {
-      totalDpr,
-      totalHindrance,
-      manpowerTotal,
-      completionRate,
-      activeCrew: Math.max(24, Math.round(manpowerTotal * 1.4)),
-      topHindrances,
-      scheduleCounts,
-      monthlyDpr: Array.from(monthlyDpr.entries()).slice(-6),
-      lastUpdated: new Date().toLocaleDateString("en-IN", {
-        day: "2-digit",
-        month: "short",
-        year: "numeric",
-      }),
-      status: "Live data from Google Sheets",
+      dprRows,
+      hindranceRows,
+      machineryRows,
+      scheduleRows,
+      stats: {
+        totalQuantity,
+        totalLabor,
+        totalHindrances,
+        openHindrances,
+        totalMachinery,
+        totalSchedules,
+      },
     };
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Could not load analytics.";
-
+    console.error("Error loading analytics:", error);
     return {
-      totalDpr: 0,
-      totalHindrance: 0,
-      manpowerTotal: 0,
-      completionRate: 0,
-      activeCrew: 0,
-      topHindrances: [],
-      scheduleCounts: { "Not Started": 0, "In Progress": 0, "Completed": 0, "Delayed": 0 },
-      monthlyDpr: [],
-      lastUpdated: "N/A",
-      status: message,
+      dprRows: [],
+      hindranceRows: [],
+      machineryRows: [],
+      scheduleRows: [],
+      stats: {
+        totalQuantity: 0,
+        totalLabor: 0,
+        totalHindrances: 0,
+        openHindrances: 0,
+        totalMachinery: 0,
+        totalSchedules: 0,
+      },
     };
   }
 }
@@ -139,121 +72,73 @@ export default async function AnalyticsPage() {
     redirect("/login");
   }
 
-  const analytics = await loadAnalytics();
-  const totalSchedule = Object.values(analytics.scheduleCounts).reduce((sum, value) => sum + value, 0);
+  const data = await loadAnalytics();
 
   return (
     <main className="min-h-screen bg-slate-100 px-4 py-8 text-slate-900">
       <div className="mx-auto max-w-7xl space-y-6">
-        <header className="rounded-3xl bg-gradient-to-r from-slate-900 via-indigo-900 to-cyan-900 p-6 text-white shadow-lg shadow-slate-200/80">
+        <header className="rounded-3xl bg-gradient-to-r from-slate-900 via-indigo-950 to-blue-900 p-6 text-white shadow-xl">
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
-              <p className="text-xs uppercase tracking-[0.22em] text-cyan-200">Analytics</p>
-              <h1 className="mt-2 text-3xl font-bold">Project Performance Dashboard</h1>
+              <p className="text-xs uppercase tracking-[0.22em] text-indigo-300">Live Sheets Sync</p>
+              <h1 className="mt-2 text-3xl font-bold">Analytics & Progress Dashboard</h1>
+              <p className="mt-1 text-sm text-slate-300">
+                Aggregated from pre-existing sheets: Input, Add Hindrance, Machinery Input & Schedules
+              </p>
             </div>
-            <div className="flex flex-wrap items-center gap-3">
-              <Link href="/dashboard" className="rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-sm font-medium text-white transition hover:bg-white/20">
-                Back to Dashboard
-              </Link>
-            </div>
+            <Link
+              href="/dashboard"
+              className="inline-flex items-center rounded-xl border border-white/20 bg-white/10 px-4 py-2 text-sm font-medium text-white transition hover:bg-white/20"
+            >
+              ← Back to Dashboard
+            </Link>
           </div>
         </header>
 
-        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {/* Metric Cards */}
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">DPR Entries</p>
-            <div className="mt-3 flex items-end justify-between">
-              <span className="text-3xl font-bold text-slate-900">{analytics.totalDpr}</span>
-              <span className="rounded-full bg-indigo-50 px-2 py-1 text-xs font-semibold text-indigo-700">Live</span>
-            </div>
+            <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">DPR Executed</span>
+            <p className="mt-4 text-3xl font-bold text-slate-900">{data.stats.totalQuantity.toLocaleString()}</p>
+            <p className="mt-1 text-xs text-slate-500">Total units across all activities</p>
           </div>
-
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Hindrances</p>
-            <div className="mt-3 flex items-end justify-between">
-              <span className="text-3xl font-bold text-slate-900">{analytics.totalHindrance}</span>
-              <span className="rounded-full bg-rose-50 px-2 py-1 text-xs font-semibold text-rose-700">Issues</span>
-            </div>
+            <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">Total Manpower</span>
+            <p className="mt-4 text-3xl font-bold text-slate-900">{data.stats.totalLabor.toLocaleString()}</p>
+            <p className="mt-1 text-xs text-slate-500">Total deployed labor recorded</p>
           </div>
-
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Manpower</p>
-            <div className="mt-3 flex items-end justify-between">
-              <span className="text-3xl font-bold text-slate-900">{analytics.manpowerTotal}</span>
-              <span className="rounded-full bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700">Qty</span>
-            </div>
+            <span className="rounded-full bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700">Open Hindrances</span>
+            <p className="mt-4 text-3xl font-bold text-slate-900">{data.stats.openHindrances}</p>
+            <p className="mt-1 text-xs text-slate-500">Out of {data.stats.totalHindrances} reported issues</p>
           </div>
-
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Completion</p>
-            <div className="mt-3 flex items-end justify-between">
-              <span className="text-3xl font-bold text-slate-900">{analytics.completionRate}%</span>
-              <span className="rounded-full bg-cyan-50 px-2 py-1 text-xs font-semibold text-cyan-700">Schedule</span>
-            </div>
+            <span className="rounded-full bg-violet-50 px-2.5 py-1 text-xs font-semibold text-violet-700">Active Schedules</span>
+            <p className="mt-4 text-3xl font-bold text-slate-900">{data.stats.totalSchedules}</p>
+            <p className="mt-1 text-xs text-slate-500">Milestone rows monitored</p>
           </div>
-        </section>
+        </div>
 
-        <section className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <div className="flex items-center justify-between">
-              <h2 className="text-xl font-semibold text-slate-800">Milestone Progress</h2>
-              <span className="text-sm text-slate-500">Updated: {analytics.lastUpdated}</span>
-            </div>
-
-            <div className="mt-5 space-y-4">
-              {Object.entries(analytics.scheduleCounts).map(([label, value]) => {
-                const width = totalSchedule === 0 ? 0 : (value / totalSchedule) * 100;
-                return (
-                  <div key={label}>
-                    <div className="mb-1 flex items-center justify-between text-sm">
-                      <span className="text-slate-600">{label}</span>
-                      <span className="font-semibold text-slate-800">{value}</span>
-                    </div>
-                    <div className="h-2.5 overflow-hidden rounded-full bg-slate-200">
-                      <div
-                        className="h-full rounded-full bg-indigo-500"
-                        style={{ width: `${width}%` }}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h2 className="text-xl font-semibold text-slate-800">Site Health</h2>
-            <div className="mt-5 space-y-4">
-              <div className="rounded-xl bg-slate-50 p-4">
-                <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Active crew</p>
-                <p className="mt-2 text-2xl font-bold text-slate-900">{analytics.activeCrew}</p>
-              </div>
-              <div className="rounded-xl bg-slate-50 p-4">
-                <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Status</p>
-                <p className="mt-2 text-sm font-medium text-slate-700">{analytics.status}</p>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section className="grid gap-6 xl:grid-cols-[1fr_1fr]">
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h2 className="text-xl font-semibold text-slate-800">Top Hindrance Categories</h2>
-            <div className="mt-5 space-y-4">
-              {analytics.topHindrances.length === 0 ? (
-                <p className="text-sm text-slate-500">No data available yet.</p>
+        {/* Data Previews */}
+        <div className="grid gap-6 lg:grid-cols-2">
+          {/* Recent DPR Logs */}
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 className="text-lg font-bold text-slate-800">Recent DPR Logs (Sheet: 'Input ')</h2>
+            <div className="mt-4 space-y-3 max-h-96 overflow-y-auto">
+              {data.dprRows.length === 0 ? (
+                <p className="text-sm text-slate-500">No DPR entries found in sheet.</p>
               ) : (
-                analytics.topHindrances.map((item) => (
-                  <div key={item.label}>
-                    <div className="mb-1 flex items-center justify-between text-sm">
-                      <span className="text-slate-600">{item.label}</span>
-                      <span className="font-semibold text-slate-800">{item.count}</span>
+                data.dprRows.slice(0, 10).map((r) => (
+                  <div key={r.id} className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+                    <div className="flex items-center justify-between text-xs text-slate-500">
+                      <span>{r.date || r.timestamp}</span>
+                      <span className="font-semibold text-slate-700">{r.lineCode}</span>
                     </div>
-                    <div className="h-2.5 overflow-hidden rounded-full bg-slate-200">
-                      <div
-                        className="h-full rounded-full bg-rose-500"
-                        style={{ width: `${getBarWidth(item.count, analytics.totalHindrance || 1)}%` }}
-                      />
+                    <p className="mt-1 text-sm font-semibold text-slate-800 line-clamp-1">{r.itemDescription}</p>
+                    <div className="mt-2 flex items-center justify-between text-xs text-slate-600">
+                      <span>Qty: <strong>{r.actualQty}</strong></span>
+                      <span>Manpower: <strong>{r.manpower}</strong></span>
+                      <span className="text-slate-400">By: {r.enteredBy}</span>
                     </div>
                   </div>
                 ))
@@ -261,30 +146,33 @@ export default async function AnalyticsPage() {
             </div>
           </div>
 
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h2 className="text-xl font-semibold text-slate-800">DPR Volume</h2>
-            <div className="mt-5 space-y-4">
-              {analytics.monthlyDpr.length === 0 ? (
-                <p className="text-sm text-slate-500">No monthly data available yet.</p>
+          {/* Active Hindrances */}
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 className="text-lg font-bold text-slate-800">Active Hindrances (Sheet: 'Add Hindrance')</h2>
+            <div className="mt-4 space-y-3 max-h-96 overflow-y-auto">
+              {data.hindranceRows.length === 0 ? (
+                <p className="text-sm text-slate-500">No hindrances logged in sheet.</p>
               ) : (
-                analytics.monthlyDpr.map(([month, count]) => (
-                  <div key={month}>
-                    <div className="mb-1 flex items-center justify-between text-sm">
-                      <span className="text-slate-600">{month}</span>
-                      <span className="font-semibold text-slate-800">{count}</span>
+                data.hindranceRows.slice(0, 10).map((h) => (
+                  <div key={h.id} className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-medium text-slate-500">{h.startDate}</span>
+                      <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-semibold text-rose-700">
+                        {h.status}
+                      </span>
                     </div>
-                    <div className="h-2.5 overflow-hidden rounded-full bg-slate-200">
-                      <div
-                        className="h-full rounded-full bg-emerald-500"
-                        style={{ width: `${getBarWidth(count, Math.max(...analytics.monthlyDpr.map(([, total]) => total), 1))}%` }}
-                      />
+                    <p className="mt-1 text-sm font-semibold text-slate-800">{h.hindrance}</p>
+                    <p className="mt-1 text-xs text-slate-600 line-clamp-2">{h.remarks}</p>
+                    <div className="mt-2 text-[11px] text-slate-500 flex justify-between">
+                      <span>Job Card: <strong>{h.jobCardNo}</strong></span>
+                      <span>ID: {h.id}</span>
                     </div>
                   </div>
                 ))
               )}
             </div>
           </div>
-        </section>
+        </div>
       </div>
     </main>
   );
