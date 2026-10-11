@@ -64,14 +64,18 @@ export default function DprPage() {
         if (masterData.success) {
           setJobCards(masterData.jobCards || []);
           setBoqList(masterData.boq || []);
+        } else {
+          setStatus(masterData.message || "Unable to load master dropdown data from Google Sheets.");
         }
 
         if (dprData.success) {
           setEntries(dprData.items || []);
+        } else if (!masterData.message) {
+          setStatus(dprData.message || "Unable to load DPR entries.");
         }
       } catch (err) {
         console.error(err);
-        setStatus("Failed to load initial sheet data.");
+        setStatus(err instanceof Error ? err.message : "Failed to load initial sheet data.");
       } finally {
         setLoading(false);
       }

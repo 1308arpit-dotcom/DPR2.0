@@ -4,7 +4,7 @@ export type SheetRow = Record<string, string>;
 
 // Names of pre-existing sheets in the spreadsheet
 export const SHEETS = {
-  DPR_INPUT: "Input ", // Note the trailing space as in the original spreadsheet
+  DPR_INPUT: "Input ", // Note trailing space
   ADD_HINDRANCE: "Add Hindrance",
   EDIT_HINDRANCE: "Edit Hindrance",
   MACHINERY_INPUT: "Machinery Input",
@@ -18,6 +18,27 @@ export const SHEETS = {
   REPORT: "Report",
 } as const;
 
+// In-memory cache to guarantee ultra-fast responses and prevent Vercel timeouts
+type CacheEntry<T> = {
+  data: T;
+  timestamp: number;
+};
+
+const cache = new Map<string, CacheEntry<unknown>>();
+const CACHE_TTL_MS = 60 * 1000; // 60 seconds TTL
+
+function getFromCache<T>(key: string): T | null {
+  const cached = cache.get(key);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+    return cached.data as T;
+  }
+  return null;
+}
+
+function setInCache<T>(key: string, data: T): void {
+  cache.set(key, { data, timestamp: Date.now() });
+}
+
 async function getSheetsClient() {
   const clientEmail = process.env.GOOGLE_CLIENT_EMAIL || process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
   let privateKey = process.env.GOOGLE_PRIVATE_KEY || "";
@@ -29,8 +50,11 @@ async function getSheetsClient() {
   const spreadsheetId = process.env.GOOGLE_SHEET_ID;
 
   if (!clientEmail || !privateKey || !spreadsheetId) {
+    console.warn(
+      `Google Sheets credentials status: Email=${!!clientEmail}, Key=${!!privateKey}, SheetId=${!!spreadsheetId}`
+    );
     throw new Error(
-      `Google Sheets credentials missing: Email=${!!clientEmail}, Key=${!!privateKey}, SheetId=${!!spreadsheetId}`
+      `Google Sheets credentials missing. Ensure GOOGLE_CLIENT_EMAIL, GOOGLE_PRIVATE_KEY, and GOOGLE_SHEET_ID are set in Vercel.`
     );
   }
 
@@ -47,14 +71,19 @@ async function getSheetsClient() {
 }
 
 /**
- * Reads all rows from a pre-existing sheet matching the column headers.
+ * Reads rows with an optional maxRows limit to stay blazing fast.
  */
-export async function readSheet(sheetName: string): Promise<SheetRow[]> {
+export async function readSheet(sheetName: string, maxRows?: number): Promise<SheetRow[]> {
+  const cacheKey = `readSheet:${sheetName}:${maxRows || "all"}`;
+  const cached = getFromCache<SheetRow[]>(cacheKey);
+  if (cached) return cached;
+
   const { spreadsheetId, sheets } = await getSheetsClient();
+  const range = maxRows ? `'${sheetName}'!A1:Z${maxRows}` : `'${sheetName}'!A1:Z`;
 
   const response = await sheets.spreadsheets.values.get({
     spreadsheetId,
-    range: `'${sheetName}'!A1:ZZ`,
+    range,
   });
 
   const rows = response.data.values ?? [];
@@ -65,7 +94,7 @@ export async function readSheet(sheetName: string): Promise<SheetRow[]> {
   const [headerRow, ...dataRows] = rows;
   const headers = headerRow.map((h) => String(h ?? "").trim());
 
-  return dataRows
+  const result = dataRows
     .filter((row) => row && row.some((cell) => cell !== undefined && cell !== ""))
     .map((row) => {
       const rowObject: SheetRow = {};
@@ -76,10 +105,13 @@ export async function readSheet(sheetName: string): Promise<SheetRow[]> {
       });
       return rowObject;
     });
+
+  setInCache(cacheKey, result);
+  return result;
 }
 
 /**
- * Appends a new row to a pre-existing sheet respecting its existing headers.
+ * Appends a new row to a pre-existing sheet matching existing headers.
  */
 export async function appendToSheet(
   sheetName: string,
@@ -87,7 +119,7 @@ export async function appendToSheet(
 ): Promise<Record<string, string>> {
   const { spreadsheetId, sheets } = await getSheetsClient();
 
-  // Read header row first to guarantee columns match the sheet order exactly
+  // Read header row first to guarantee column positions
   const headerRes = await sheets.spreadsheets.values.get({
     spreadsheetId,
     range: `'${sheetName}'!1:1`,
@@ -98,7 +130,6 @@ export async function appendToSheet(
     throw new Error(`Sheet '${sheetName}' does not have a header row.`);
   }
 
-  // Create row matching header positions (case-insensitive)
   const entryLower: Record<string, string> = {};
   for (const [k, v] of Object.entries(entryData)) {
     entryLower[k.toLowerCase().trim()] = String(v ?? "").trim();
@@ -117,6 +148,13 @@ export async function appendToSheet(
       values: [orderedRow],
     },
   });
+
+  // Clear cache for this sheet
+  for (const key of cache.keys()) {
+    if (key.includes(sheetName)) {
+      cache.delete(key);
+    }
+  }
 
   const resultObj: Record<string, string> = {};
   headers.forEach((h, i) => {
@@ -137,8 +175,12 @@ export type JobCardOption = {
 };
 
 export async function getJobCards(): Promise<JobCardOption[]> {
+  const cacheKey = "master:jobCards";
+  const cached = getFromCache<JobCardOption[]>(cacheKey);
+  if (cached) return cached;
+
   try {
-    const rows = await readSheet(SHEETS.JOB_CARD_MASTER);
+    const rows = await readSheet(SHEETS.JOB_CARD_MASTER, 100);
     const set = new Map<string, JobCardOption>();
 
     for (const r of rows) {
@@ -153,7 +195,9 @@ export async function getJobCards(): Promise<JobCardOption[]> {
       }
     }
 
-    return Array.from(set.values());
+    const result = Array.from(set.values());
+    setInCache(cacheKey, result);
+    return result;
   } catch (error) {
     console.error("Error reading Job Card Master:", error);
     return [];
@@ -170,8 +214,13 @@ export type BoqOption = {
 };
 
 export async function getBoqItems(filterJobCard?: string): Promise<BoqOption[]> {
+  const cacheKey = `master:boq:${filterJobCard || "all"}`;
+  const cached = getFromCache<BoqOption[]>(cacheKey);
+  if (cached) return cached;
+
   try {
-    const rows = await readSheet(SHEETS.BOQ);
+    // Read up to 2500 BOQ items for instant delivery
+    const rows = await readSheet(SHEETS.BOQ, 2500);
     const items: BoqOption[] = [];
 
     for (const r of rows) {
@@ -193,6 +242,7 @@ export async function getBoqItems(filterJobCard?: string): Promise<BoqOption[]> 
       });
     }
 
+    setInCache(cacheKey, items);
     return items;
   } catch (error) {
     console.error("Error reading BOQ:", error);
@@ -207,8 +257,12 @@ export type HindranceCategory = {
 };
 
 export async function getHindranceCategories(): Promise<HindranceCategory[]> {
+  const cacheKey = "master:hindranceCategories";
+  const cached = getFromCache<HindranceCategory[]>(cacheKey);
+  if (cached) return cached;
+
   try {
-    const rows = await readSheet(SHEETS.LEGEND);
+    const rows = await readSheet(SHEETS.LEGEND, 100);
     const set = new Map<string, HindranceCategory>();
 
     for (const r of rows) {
@@ -225,7 +279,9 @@ export async function getHindranceCategories(): Promise<HindranceCategory[]> {
       }
     }
 
-    return Array.from(set.values());
+    const result = Array.from(set.values());
+    setInCache(cacheKey, result);
+    return result;
   } catch (error) {
     console.error("Error reading Legend Hindrances:", error);
     return [];
@@ -240,8 +296,12 @@ export type MachineryOption = {
 };
 
 export async function getMachineryOptions(): Promise<MachineryOption[]> {
+  const cacheKey = "master:machinery";
+  const cached = getFromCache<MachineryOption[]>(cacheKey);
+  if (cached) return cached;
+
   try {
-    const rows = await readSheet(SHEETS.MACHINERY);
+    const rows = await readSheet(SHEETS.MACHINERY, 500);
     const items: MachineryOption[] = [];
 
     for (const r of rows) {
@@ -256,6 +316,7 @@ export async function getMachineryOptions(): Promise<MachineryOption[]> {
       });
     }
 
+    setInCache(cacheKey, items);
     return items;
   } catch (error) {
     console.error("Error reading Machinery:", error);
@@ -265,9 +326,6 @@ export async function getMachineryOptions(): Promise<MachineryOption[]> {
 
 // -------------------------------------------------------------
 // DPR LOGIC (Pre-existing Sheet: "Input ")
-// Headers: Time Stamp, Entered By, Line Code, Item Description,
-//          Actual Qty, Manpower, Remark, Upload Document, Plan Qty,
-//          Uploaded Document, Date Of DPR
 // -------------------------------------------------------------
 
 export type DprPayload = {
@@ -300,9 +358,10 @@ export async function recordDpr(payload: DprPayload) {
   });
 }
 
-export async function fetchDprEntries() {
-  const rows = await readSheet(SHEETS.DPR_INPUT);
-  return rows.map((r, index) => ({
+export async function fetchDprEntries(limit = 100) {
+  const rows = await readSheet(SHEETS.DPR_INPUT, limit);
+  // Return the most recent entries
+  return rows.slice(-limit).reverse().map((r, index) => ({
     id: `dpr-${index}`,
     timestamp: r["Time Stamp"] || "",
     date: r["Date Of DPR"] || "",
@@ -318,10 +377,6 @@ export async function fetchDprEntries() {
 
 // -------------------------------------------------------------
 // HINDRANCE LOGIC (Pre-existing Sheet: "Add Hindrance")
-// Headers: Timestamp, Entered By, Job Card No, Start Date,
-//          Select Hindrance, Remark, Upload Document, Task ID,
-//          End Date Of Hindrance, Remark (When Hindrance Solve),
-//          Upload Document /Image, Status, Category, Sub Category
 // -------------------------------------------------------------
 
 export type HindrancePayload = {
@@ -362,9 +417,9 @@ export async function recordHindrance(payload: HindrancePayload) {
   });
 }
 
-export async function fetchHindranceEntries() {
-  const rows = await readSheet(SHEETS.ADD_HINDRANCE);
-  return rows.map((r, index) => ({
+export async function fetchHindranceEntries(limit = 100) {
+  const rows = await readSheet(SHEETS.ADD_HINDRANCE, limit);
+  return rows.slice(-limit).reverse().map((r, index) => ({
     id: r["Task ID"] || `hin-${index}`,
     timestamp: r["Timestamp"] || "",
     startDate: r["Start Date"] || "",
@@ -381,8 +436,6 @@ export async function fetchHindranceEntries() {
 
 // -------------------------------------------------------------
 // MACHINERY & MANPOWER LOGIC (Pre-existing Sheet: "Machinery Input")
-// Headers: Timestamp, Date, T Code, Item Description,
-//          Current Actual, Plan Qty, Remark, Job Card No
 // -------------------------------------------------------------
 
 export type MachineryPayload = {
@@ -410,9 +463,9 @@ export async function recordMachineryInput(payload: MachineryPayload) {
   });
 }
 
-export async function fetchMachineryEntries() {
-  const rows = await readSheet(SHEETS.MACHINERY_INPUT);
-  return rows.map((r, index) => ({
+export async function fetchMachineryEntries(limit = 100) {
+  const rows = await readSheet(SHEETS.MACHINERY_INPUT, limit);
+  return rows.slice(-limit).reverse().map((r, index) => ({
     id: `mach-${index}`,
     timestamp: r["Timestamp"] || "",
     date: r["Date"] || "",
@@ -427,15 +480,11 @@ export async function fetchMachineryEntries() {
 
 // -------------------------------------------------------------
 // SCHEDULES LOGIC (Pre-existing Sheet: "Schedules")
-// Headers: Job Card No, Building No with Phase No, Schedule Status,
-//          Description, Balance Qty, Total Qty, Actual Qty,
-//          % Of Actual, Status (Running), Plan Start Date,
-//          Actual Start Date, Plan End Date, Actual End Date, Remark...
 // -------------------------------------------------------------
 
-export async function fetchScheduleEntries() {
-  const rows = await readSheet(SHEETS.SCHEDULES);
-  return rows.map((r, index) => ({
+export async function fetchScheduleEntries(limit = 150) {
+  const rows = await readSheet(SHEETS.SCHEDULES, limit);
+  return rows.slice(0, limit).map((r, index) => ({
     id: `sch-${index}`,
     jobCardNo: r["Job Card No"] || "",
     description: r["Description"] || r["Building No with Phase No"] || "Milestone",
