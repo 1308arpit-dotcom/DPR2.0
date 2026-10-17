@@ -2,6 +2,19 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import {
+  ShieldAlert,
+  Check,
+  Trash2,
+  ArrowLeft,
+  RefreshCw,
+  AlertCircle,
+  CheckCircle2,
+  Filter,
+  FileSpreadsheet,
+  AlertOctagon,
+  Truck,
+} from "lucide-react";
 
 type CriticalItem = {
   id: string;
@@ -14,11 +27,14 @@ type CriticalItem = {
 
 export default function CriticalUpdatesPage() {
   const [items, setItems] = useState<CriticalItem[]>([]);
+  const [moduleFilter, setModuleFilter] = useState("all");
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(true);
 
   async function loadItems() {
     try {
+      setLoading(true);
+      setStatus("");
       const response = await fetch("/api/critical-updates");
       const data = (await response.json()) as { success?: boolean; items?: CriticalItem[]; message?: string };
 
@@ -60,81 +76,179 @@ export default function CriticalUpdatesPage() {
       }
 
       setItems((current) => current.filter((entry) => entry.id !== item.id));
-      setStatus(data.message || "Updated successfully.");
+      setStatus(`success:${data.message || `Item ${action === "approve" ? "approved" : "archived"} successfully.`}`);
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Failed to process critical update.");
+      setStatus(`error:${error instanceof Error ? error.message : "Failed to process critical update."}`);
     }
   }
 
+  const filteredItems = items.filter((item) => {
+    if (moduleFilter === "all") return true;
+    return item.module.toLowerCase().includes(moduleFilter.toLowerCase());
+  });
+
   return (
-    <main className="min-h-screen bg-slate-100 px-4 py-10">
-      <div className="mx-auto max-w-6xl space-y-6">
-        <header className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-xs uppercase tracking-[0.22em] text-red-600">Admin</p>
-              <h1 className="mt-2 text-3xl font-bold text-slate-900">Critical Updates</h1>
+    <main className="min-h-screen bg-slate-50/60 px-4 py-8 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-7xl space-y-6">
+        {/* Header */}
+        <header className="rounded-3xl bg-gradient-to-r from-slate-950 via-amber-950 to-slate-900 p-6 sm:p-8 text-white shadow-xl shadow-slate-950/10 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div className="space-y-1">
+            <div className="inline-flex items-center gap-2 rounded-full border border-amber-400/30 bg-amber-500/10 px-3 py-1 text-xs font-semibold text-amber-300">
+              <ShieldAlert className="h-3.5 w-3.5" />
+              <span>Admin Queue & Audit Triage</span>
             </div>
-            <Link href="/dashboard" className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700 hover:border-red-200 hover:text-red-700">
-              Back to Dashboard
+            <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
+              Critical Updates & Review Queue
+            </h1>
+            <p className="text-xs sm:text-sm text-slate-300">
+              Review and audit pending site inputs across DPR, Hindrance, and Machinery modules
+            </p>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => void loadItems()}
+              disabled={loading}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-white/20 bg-white/10 px-3.5 py-2 text-xs font-semibold text-white backdrop-blur-md hover:bg-white/20 transition active:scale-95 disabled:opacity-50"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+              <span>Refresh</span>
+            </button>
+            <Link
+              href="/dashboard"
+              className="inline-flex items-center gap-1.5 rounded-xl bg-white px-4 py-2 text-xs font-bold text-slate-900 shadow-sm hover:bg-slate-100 transition active:scale-95"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+              <span>Dashboard</span>
             </Link>
           </div>
         </header>
 
         {status && (
-          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            {status}
+          <div
+            className={`rounded-2xl p-4 text-xs font-semibold flex items-center gap-2 ${
+              status.startsWith("success:")
+                ? "bg-emerald-50 text-emerald-800 border border-emerald-200"
+                : "bg-rose-50 text-rose-800 border border-rose-200"
+            }`}
+          >
+            {status.startsWith("success:") ? (
+              <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+            ) : (
+              <AlertCircle className="h-4 w-4 text-rose-600 shrink-0" />
+            )}
+            <span>{status.replace(/^(success|error):/, "")}</span>
           </div>
         )}
 
-        <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="mb-5 flex items-center justify-between">
-            <h2 className="text-xl font-semibold text-slate-800">Pending review queue</h2>
-            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium uppercase tracking-[0.15em] text-slate-600">
-              {items.length} items
-            </span>
+        {/* Triage Section */}
+        <section className="rounded-3xl border border-slate-200/80 bg-white p-6 sm:p-8 shadow-sm">
+          <div className="mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+            <div>
+              <h2 className="text-base font-bold text-slate-900">Pending Review Items</h2>
+              <p className="text-xs text-slate-500">Live feed of unverified or recently reported site activities</p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-slate-500">Filter:</span>
+              <div className="flex rounded-lg bg-slate-100 p-0.5 border border-slate-200/60">
+                {[
+                  { id: "all", label: "All" },
+                  { id: "dpr", label: "DPR" },
+                  { id: "hindrance", label: "Hindrance" },
+                  { id: "machinery", label: "Plant" },
+                ].map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setModuleFilter(tab.id)}
+                    className={`rounded-md px-2.5 py-1 text-xs font-semibold transition ${
+                      moduleFilter === tab.id
+                        ? "bg-white text-slate-900 shadow-xs"
+                        : "text-slate-500 hover:text-slate-800"
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
 
           {loading ? (
-            <p className="text-sm text-slate-500">Loading updates…</p>
-          ) : items.length === 0 ? (
-            <p className="text-sm text-slate-500">No critical updates pending.</p>
+            <div className="py-24 text-center">
+              <RefreshCw className="mx-auto h-6 w-6 text-amber-600 animate-spin" />
+              <p className="mt-3 text-xs font-semibold text-slate-700">Aggregating review queue from Google Sheets...</p>
+            </div>
+          ) : filteredItems.length === 0 ? (
+            <div className="py-24 text-center">
+              <CheckCircle2 className="mx-auto h-8 w-8 text-emerald-500" />
+              <p className="mt-3 text-sm font-bold text-slate-800">All caught up! Queue is clear.</p>
+              <p className="text-xs text-slate-400 mt-1">No pending critical updates requiring admin review.</p>
+            </div>
           ) : (
-            <div className="space-y-4">
-              {items.map((item) => (
-                <div key={item.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                  <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="rounded-full bg-red-100 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-red-700">
-                          {item.module}
-                        </span>
-                        <span className="text-xs text-slate-500">{item.date}</span>
-                      </div>
-                      <h3 className="mt-2 text-lg font-semibold text-slate-800">{item.title}</h3>
-                      <p className="mt-1 text-sm text-slate-600">{item.summary}</p>
-                      <p className="mt-2 text-xs text-slate-500">Submitted by: {item.submittedBy}</p>
-                    </div>
+            <div className="space-y-3.5">
+              {filteredItems.map((item) => {
+                const isDpr = item.module === "DPR";
+                const isHindrance = item.module === "Hindrance";
 
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => void updateAction("approve", item)}
-                        className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-500"
-                      >
-                        Approve
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void updateAction("delete", item)}
-                        className="rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-500"
-                      >
-                        Delete
-                      </button>
+                return (
+                  <div
+                    key={item.id}
+                    className="rounded-2xl border border-slate-200/80 bg-slate-50/70 p-5 hover:bg-white hover:border-amber-300 hover:shadow-xs transition-all"
+                  >
+                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                      <div className="space-y-1.5 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                              isDpr
+                                ? "bg-indigo-100 text-indigo-700"
+                                : isHindrance
+                                ? "bg-rose-100 text-rose-700"
+                                : "bg-blue-100 text-blue-700"
+                            }`}
+                          >
+                            {item.module}
+                          </span>
+                          <span className="text-xs text-slate-400">{item.date}</span>
+                        </div>
+
+                        <h3 className="text-sm sm:text-base font-bold text-slate-900">
+                          {item.title}
+                        </h3>
+                        <p className="text-xs text-slate-600 font-medium">
+                          {item.summary}
+                        </p>
+                        <p className="text-[11px] text-slate-400">
+                          Logged by: <strong className="text-slate-600">{item.submittedBy}</strong>
+                        </p>
+                      </div>
+
+                      {/* Action buttons */}
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => void updateAction("approve", item)}
+                          className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 py-2 text-xs font-bold text-white shadow-xs hover:bg-emerald-500 transition active:scale-95"
+                        >
+                          <Check className="h-3.5 w-3.5" />
+                          <span>Approve</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => void updateAction("delete", item)}
+                          className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 hover:border-rose-200 transition active:scale-95"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          <span>Archive</span>
+                        </button>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </section>

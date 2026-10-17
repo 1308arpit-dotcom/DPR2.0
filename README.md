@@ -1,40 +1,35 @@
-<<<<<<< HEAD
-# DPR2.0
-=======
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# EPACK DPR 2.0 • Construction Cloud Platform
+
+An enterprise-grade Daily Progress Reporting (DPR), Hindrance Management, and Plant & Machinery Tracking web portal integrated directly with Google Sheets.
+
+## Features
+
+- **Daily Progress Reporting (DPR)**: Live reading from BOQ and Job Card masters; record daily executed quantities and manpower directly into the `'Input '` sheet.
+- **Site Hindrance Reporting**: Report site delays, vendor shortages, and client clearances with categorized issue tags synced to the `'Add Hindrance'` sheet.
+- **Plant & Machinery Tracking**: Track daily hydra, cranes, and specialized labor deployment into the `'Machinery Input'` sheet.
+- **Schedule & Milestone Tracking**: View building phases, target dates, and progress percentages from the `'Schedules'` sheet.
+- **Executive Analytics**: Real-time aggregated productivity KPIs, labor person-days, and bottleneck analysis.
+- **Critical Updates Queue**: Triage and audit pending site inputs across modules.
+
+## Architecture & Technology Stack
+
+- **Framework**: Next.js 16 (App Router) with React 19
+- **Styling**: TailwindCSS 4 with glassmorphism and modern enterprise color tokens
+- **Icons**: Lucide Icons
+- **Database / Backend**: Google Sheets API v4 (JWT Service Account authentication with in-memory caching)
 
 ## Getting Started
 
-First, run the development server:
+1. Ensure environment variables are configured in `.env.local`:
+   ```bash
+   GOOGLE_CLIENT_EMAIL="your-service-account@project.iam.gserviceaccount.com"
+   GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----"
+   GOOGLE_SHEET_ID="your_google_sheet_id"
+   ```
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+2. Run the development server:
+   ```bash
+   npm run dev
+   ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
->>>>>>> e84c834 (Initial commit from Create Next App)
+3. Open [http://localhost:3000](http://localhost:3000) in your browser.
